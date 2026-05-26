@@ -1,0 +1,438 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/**"
+      - "infrastructure/**"
+      - "docker-compose*.yml"
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "services/**"
+      - "infrastructure/**"
+      - "docker-compose*.yml"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  node-unit:
+    name: unit / node / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gateway
+            path: services/gateway
+          - service: bank-mock
+            path: services/bank-mock
+          - service: webhook
+            path: services/webhook
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.path }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ${{ matrix.path }}
+
+      - name: Generate Prisma client when configured
+        run: npm run --if-present prisma:generate
+        working-directory: ${{ matrix.path }}
+
+      - name: Run unit tests
+        run: npm test -- --runInBand
+        working-directory: ${{ matrix.path }}
+
+      - name: Build service
+        run: npm run build
+        working-directory: ${{ matrix.path }}
+
+  go-unit:
+    name: unit / go / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: auth
+            path: services/auth
+          - service: payment
+            path: services/payment
+          - service: ledger
+            path: services/ledger
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.path }}/go.mod
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+        working-directory: ${{ matrix.path }}
+
+      - name: Run unit tests
+        run: go test -tags nomsgpack ./...
+        working-directory: ${{ matrix.path }}
+
+      - name: Build service
+        run: go build -tags nomsgpack -o /tmp/${{ matrix.service }} ./cmd/api
+        working-directory: ${{ matrix.path }}
+
+  node-security:
+    name: security / node audit / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gateway
+            path: services/gateway
+          - service: bank-mock
+            path: services/bank-mock
+          - service: webhook
+            path: services/webhook
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.path }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ${{ matrix.path }}
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+        working-directory: ${{ matrix.path }}
+
+  go-security:
+    name: security / govulncheck / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: auth
+            path: services/auth
+          - service: payment
+            path: services/payment
+          - service: ledger
+            path: services/ledger
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.path }}/go.mod
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: |
+          "$(go env GOPATH)/bin/govulncheck" ./...
+        working-directory: ${{ matrix.path }}
+
+  repo-hygiene:
+    name: security / repo hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail on committed local env files
+        run: |
+          find . \
+            -path './.git' -prune -o \
+            -path './node_modules' -prune -o \
+            -path './services/*/node_modules' -prune -o \
+            -type f \( -name '.env' -o -name '.env.*' \) \
+            ! -name '.env.example' ! -name '.env.prod.example' \
+            -print | tee /tmp/payment_reference-env-files
+          test ! -s /tmp/payment_reference-env-files
+
+  node-integration:
+    name: integration / node / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: node-unit
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft == false) || github.event_name == 'workflow_dispatch' }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gateway
+            path: services/gateway
+          - service: bank-mock
+            path: services/bank-mock
+          - service: webhook
+            path: services/webhook
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.path }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ${{ matrix.path }}
+
+      - name: Generate Prisma client when configured
+        run: npm run --if-present prisma:generate
+        working-directory: ${{ matrix.path }}
+
+      - name: Run integration tests
+        run: npm run test:integration -- --runInBand
+        working-directory: ${{ matrix.path }}
+
+  go-integration:
+    name: integration / go / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: go-unit
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft == false) || github.event_name == 'workflow_dispatch' }}
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: payment_reference
+          POSTGRES_PASSWORD: payment_reference
+          POSTGRES_DB: payment_reference_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U payment_reference -d payment_reference_core"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: auth
+            path: services/auth
+          - service: payment
+            path: services/payment
+          - service: ledger
+            path: services/ledger
+    env:
+      PAYMENT_REFERENCE_AUTH_TEST_DATABASE_URL: postgres://payment_reference:payment_reference@localhost:5432/payment_reference_core?sslmode=disable
+      PAYMENT_REFERENCE_PAYMENT_TEST_DATABASE_URL: postgres://payment_reference:payment_reference@localhost:5432/payment_reference_core?sslmode=disable
+      PAYMENT_REFERENCE_LEDGER_TEST_DATABASE_URL: postgres://payment_reference:payment_reference@localhost:5432/payment_reference_core?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.path }}/go.mod
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+        working-directory: ${{ matrix.path }}
+
+      - name: Run integration tests
+        run: go test -tags 'nomsgpack integration' ./...
+        working-directory: ${{ matrix.path }}
+
+  compose:
+    name: compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DB_USER: payment_reference_ci
+      DB_PASSWORD: payment-reference-ci-password
+      REDIS_PASSWORD: payment-reference-ci-redis-password
+      INTERNAL_AUTH_SECRET: payment-reference-ci-internal-secret-min-32
+      EVENT_SIGNING_SECRET: payment-reference-ci-event-signing-secret-min-32
+      WEBHOOK_SECRET_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      GRAFANA_PASSWORD: payment-reference-ci-grafana-password-min-32
+      BANK_MOCK_URL: http://bank-mock:5001
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Validate development compose
+        run: docker compose config --quiet
+
+      - name: Validate production compose
+        run: docker compose -f docker-compose.prod.yml config --quiet
+
+      - name: Validate production overlay compatibility
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+
+      - name: Assert compose targets
+        run: |
+          docker compose config > /tmp/payment_reference-dev.yml
+          docker compose -f docker-compose.prod.yml config > /tmp/payment_reference-prod.yml
+
+          dev_targets="$(grep -c "target: dev" /tmp/payment_reference-dev.yml)"
+          prod_targets="$(grep -c "target: prod" /tmp/payment_reference-prod.yml)"
+
+          test "$dev_targets" -eq 6
+          test "$prod_targets" -eq 6
+
+          ! grep -E "source: .*/services/" /tmp/payment_reference-prod.yml
+          ! grep -E "CHOKIDAR_" /tmp/payment_reference-prod.yml
+
+  docker-builds:
+    name: docker / ${{ matrix.service }} / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    needs: compose
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - gateway
+          - auth
+          - payment
+          - ledger
+          - webhook
+          - bank-mock
+        target:
+          - dev
+          - prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/${{ matrix.service }}
+          target: ${{ matrix.target }}
+          push: false
+          tags: payment-microservices-reference/${{ matrix.service }}:${{ matrix.target }}-ci
+          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.service }}-${{ matrix.target }},mode=max
+
+  e2e:
+    name: deploy gate / e2e full stack
+    runs-on: ubuntu-latest
+    needs:
+      - node-unit
+      - go-unit
+      - compose
+      - docker-builds
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
+    timeout-minutes: 20
+    env:
+      PAYMENT_REFERENCE_E2E_API_KEY: ${{ secrets.PAYMENT_REFERENCE_E2E_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Start full stack
+        run: docker compose up -d --build --wait
+
+      - name: Run service e2e tests inside compose network
+        run: |
+          docker compose exec -T auth sh -lc 'PATH=/usr/local/go/bin:/go/bin:$PATH PAYMENT_REFERENCE_AUTH_E2E_URL=http://127.0.0.1:4001 go test -tags "nomsgpack e2e" ./test/e2e'
+          docker compose exec -T payment sh -lc 'PATH=/usr/local/go/bin:/go/bin:$PATH PAYMENT_REFERENCE_PAYMENT_E2E_URL=http://127.0.0.1:4002 go test -tags "nomsgpack e2e" ./test/e2e'
+          docker compose exec -T ledger sh -lc 'PATH=/usr/local/go/bin:/go/bin:$PATH PAYMENT_REFERENCE_LEDGER_E2E_URL=http://127.0.0.1:4003 go test -tags "nomsgpack e2e" ./test/e2e'
+          docker compose exec -T -e PAYMENT_REFERENCE_E2E_API_KEY="${PAYMENT_REFERENCE_E2E_API_KEY}" gateway sh -lc 'PAYMENT_REFERENCE_E2E_BASE_URL=http://127.0.0.1:3000 npm run test:e2e -- --runInBand'
+          docker compose exec -T webhook npm run test:e2e -- --runInBand
+          docker compose exec -T bank-mock npm run test:e2e -- --runInBand
+
+      - name: Stop full stack
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  smoke:
+    name: deploy gate / staging smoke
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && vars.PAYMENT_REFERENCE_STAGING_BASE_URL != '' }}
+    timeout-minutes: 5
+    env:
+      PAYMENT_REFERENCE_STAGING_BASE_URL: ${{ vars.PAYMENT_REFERENCE_STAGING_BASE_URL }}
+      PAYMENT_REFERENCE_STAGING_API_KEY: ${{ secrets.PAYMENT_REFERENCE_STAGING_API_KEY }}
+    steps:
+      - name: Run health smoke test
+        run: curl -fsS "${PAYMENT_REFERENCE_STAGING_BASE_URL}/health"
+
+      - name: Run payment smoke test when API key is configured
+        run: |
+          if [ -z "${PAYMENT_REFERENCE_STAGING_API_KEY}" ]; then
+            echo "PAYMENT_REFERENCE_STAGING_API_KEY is not configured; skipping payment smoke test."
+            exit 0
+          fi
+
+          for attempt in 1 2 3 4 5; do
+            status="$(
+              curl -sS -o /tmp/payment_reference-smoke-payment.json -w "%{http_code}" \
+                -X POST "${PAYMENT_REFERENCE_STAGING_BASE_URL}/v1/payments" \
+                -H "Authorization: Bearer ${PAYMENT_REFERENCE_STAGING_API_KEY}" \
+                -H "Idempotency-Key: smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${attempt}" \
+                -H "Content-Type: application/json" \
+                --data '{"amount":1000,"customer_email":"smoke@example.com","customer_name":"Smoke Test","metadata":{"source":"ci-smoke"}}'
+            )"
+
+            if [ "$status" -eq 201 ]; then
+              cat /tmp/payment_reference-smoke-payment.json
+              exit 0
+            fi
+          done
+
+          cat /tmp/payment_reference-smoke-payment.json
+          exit 1

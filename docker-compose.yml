@@ -1,0 +1,348 @@
+name: payment-microservices-reference
+
+networks:
+  payment_reference:
+    driver: bridge
+
+x-internal-no-proxy: &internal-no-proxy "localhost,127.0.0.1,::1,auth,payment,ledger,webhook,gateway,bank-mock,postgres,redis,kafka,jaeger,prometheus,grafana,kafka-ui"
+
+x-dev-node-env: &dev-node-env
+  NODE_ENV: development
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  CHOKIDAR_USEPOLLING: "true"
+  CHOKIDAR_INTERVAL: "300"
+  NO_PROXY: *internal-no-proxy
+  no_proxy: *internal-no-proxy
+
+x-dev-go-env: &dev-go-env
+  APP_ENV: development
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  NO_PROXY: *internal-no-proxy
+  no_proxy: *internal-no-proxy
+
+x-db-env: &db-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_USER: ${DB_USER:-payment_reference}
+  DB_PASSWORD: ${DB_PASSWORD:-payment_reference}
+  DB_NAME: payment_reference_core
+  DB_SSLMODE: disable
+
+x-redis-env: &redis-env
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ""
+  REDIS_DB: "0"
+
+x-kafka-env: &kafka-env
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_TOPIC_PAYMENTS: payments
+  EVENT_SIGNING_SECRET: ${EVENT_SIGNING_SECRET:-local-dev-event-signing-secret-32chars-min}
+
+x-health-default: &health-default
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 45s
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+
+services:
+  gateway:
+    build:
+      context: ./services/gateway
+      target: dev
+    depends_on:
+      auth:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      ledger:
+        condition: service_healthy
+      webhook:
+        condition: service_healthy
+    environment:
+      <<: *dev-node-env
+      PORT: "3000"
+      PAYMENT_SERVICE_URL: ${PAYMENT_SERVICE_URL:-http://payment:4002}
+      LEDGER_SERVICE_URL: ${LEDGER_SERVICE_URL:-http://ledger:4003}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth:4001/api/v1/auth}
+      WEBHOOK_SERVICE_URL: ${WEBHOOK_SERVICE_URL:-http://webhook:4004}
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-dev-internal-auth-secret-32chars-min}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: gateway-service
+    networks: [payment_reference]
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./services/gateway:/app
+      - /app/node_modules
+    healthcheck:
+      <<: *health-default
+      test:
+        [
+          "CMD-SHELL",
+          "wget -Y off -qO- http://127.0.0.1:3000/health >/dev/null || exit 1",
+        ]
+
+  auth:
+    build:
+      context: ./services/auth
+      target: dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: [*dev-go-env, *db-env, *redis-env]
+      APP_PORT: "4001"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: auth-service
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-dev-internal-auth-secret-32chars-min}
+    networks: [payment_reference]
+    ports:
+      - "4001:4001"
+    volumes:
+      - ./services/auth:/app
+    healthcheck:
+      <<: *health-default
+      test:
+        [
+          "CMD-SHELL",
+          "wget -Y off -qO- http://127.0.0.1:4001/health >/dev/null || exit 1",
+        ]
+
+  payment:
+    build:
+      context: ./services/payment
+      target: dev
+    depends_on:
+      bank-mock:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: [*dev-go-env, *db-env, *redis-env, *kafka-env]
+      APP_PORT: "4002"
+      BANK_MOCK_URL: ${BANK_MOCK_URL:-http://bank-mock:5001}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: payment-service
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-dev-internal-auth-secret-32chars-min}
+    networks: [payment_reference]
+    ports:
+      - "4002:4002"
+    volumes:
+      - ./services/payment:/app
+    healthcheck:
+      <<: *health-default
+      test:
+        [
+          "CMD-SHELL",
+          "wget -Y off -qO- http://127.0.0.1:4002/health >/dev/null || exit 1",
+        ]
+
+  ledger:
+    build:
+      context: ./services/ledger
+      target: dev
+    depends_on:
+      auth:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: [*dev-go-env, *db-env, *kafka-env]
+      APP_PORT: "4003"
+      KAFKA_GROUP_ID: ledger-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: ledger-service
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-dev-internal-auth-secret-32chars-min}
+    networks: [payment_reference]
+    ports:
+      - "4003:4003"
+    volumes:
+      - ./services/ledger:/app
+    healthcheck:
+      <<: *health-default
+      test:
+        [
+          "CMD-SHELL",
+          "wget -Y off -qO- http://127.0.0.1:4003/health >/dev/null || exit 1",
+        ]
+
+  webhook:
+    build:
+      context: ./services/webhook
+      target: dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *dev-node-env
+      PORT: "4004"
+      DATABASE_URL: postgres://${DB_USER:-payment_reference}:${DB_PASSWORD:-payment_reference}@postgres:5432/payment_reference_core?sslmode=disable
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC_PAYMENTS: payments
+      KAFKA_GROUP_ID: webhook-service
+      EVENT_SIGNING_SECRET: ${EVENT_SIGNING_SECRET:-local-dev-event-signing-secret-32chars-min}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: webhook-service
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-dev-internal-auth-secret-32chars-min}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+    networks: [payment_reference]
+    ports:
+      - "4004:4004"
+    volumes:
+      - ./services/webhook:/app
+      - /app/node_modules
+    healthcheck:
+      <<: *health-default
+      test:
+        [
+          "CMD-SHELL",
+          "wget -Y off -qO- http://127.0.0.1:4004/health >/dev/null || exit 1",
+        ]
+
+  bank-mock:
+    build:
+      context: ./services/bank-mock
+      target: dev
+    environment:
+      <<: *dev-node-env
+      PORT: "5001"
+    networks: [payment_reference]
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./services/bank-mock:/app
+      - /app/node_modules
+    healthcheck:
+      <<: *health-default
+      test:
+        [
+          "CMD-SHELL",
+          "wget -Y off -qO- http://127.0.0.1:5001/ >/dev/null || exit 1",
+        ]
+
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-payment_reference}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-payment_reference}
+      POSTGRES_DB: payment_reference_core
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks: [payment_reference]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks: [payment_reference]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks: [payment_reference]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions --bootstrap-server kafka:9092 >/dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 20s
+      retries: 12
+      start_period: 45s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: payment_reference
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    networks: [payment_reference]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    restart: unless-stopped
+    networks: [payment_reference]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./infrastructure/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+    networks: [payment_reference]
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-payment_reference}
+      NO_PROXY: *internal-no-proxy
+      no_proxy: *internal-no-proxy
+    volumes:
+      - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks: [payment_reference]

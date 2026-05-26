@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: payment_reference
+    orgId: 1
+    folder: Payment Microservices Reference
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

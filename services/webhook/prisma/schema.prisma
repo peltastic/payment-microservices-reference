@@ -1,0 +1,73 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DeliveryStatus {
+  pending
+  delivered
+  failed
+  dead
+}
+
+model WebhookEndpoint {
+  id          String   @id
+  merchantId  String   @map("merchant_id")
+  url         String
+  secret      String
+  events      String[]
+  isActive    Boolean  @default(true) @map("is_active")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  @@index([merchantId])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id             String         @id
+  endpointId     String         @map("endpoint_id")
+  merchantId     String         @map("merchant_id")
+  eventId        String         @map("event_id")
+  eventType      String         @map("event_type")
+  payload        Json
+  status         DeliveryStatus @default(pending)
+  attemptCount   Int            @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime?      @map("next_attempt_at")
+  lastStatusCode Int?           @map("last_status_code")
+  lastResponse   String?        @map("last_response")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  endpoint     WebhookEndpoint @relation(fields: [endpointId], references: [id])
+  deadLetter   DeadLetterEvent?
+
+  @@index([endpointId])
+  @@index([status])
+  @@index([nextAttemptAt])
+  @@map("webhook_deliveries")
+}
+
+model DeadLetterEvent {
+  id         String   @id
+  deliveryId String   @unique @map("delivery_id")
+  endpointId String   @map("endpoint_id")
+  merchantId String   @map("merchant_id")
+  eventType  String   @map("event_type")
+  payload    Json
+  failureLog Json     @default("[]") @map("failure_log")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  delivery WebhookDelivery @relation(fields: [deliveryId], references: [id])
+
+  @@index([merchantId])
+  @@map("dead_letter_events")
+}

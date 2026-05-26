@@ -1,0 +1,77 @@
+groups:
+  - name: payment_reference
+
+    rules:
+      # Payment service error rate above 5% for 60 seconds
+      - alert: HighPaymentErrorRate
+        expr: |
+          (
+            sum(rate(payment_reference_payments_total{status="failed"}[1m]))
+            /
+            sum(rate(payment_reference_payments_total[1m]))
+          ) > 0.05
+        for: 60s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Payment error rate above 5%"
+          description: "Payment failure rate is {{ $value | humanizePercentage }} over the last minute"
+
+      # Any service returning 5xx errors
+      - alert: ServiceHighErrorRate
+        expr: |
+          sum by (job) (
+            rate(http_requests_total{status=~"5.."}[2m])
+          ) > 0.1
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "{{ $labels.job }} is returning 5xx errors at {{ $value }} req/s"
+
+      # Any service is down (no scrape data for 30 seconds)
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.job }}"
+
+      # p95 latency above 1 second
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (job, le) (
+              rate(http_request_duration_seconds_bucket[5m])
+            )
+          ) > 1
+        for: 60s
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency on {{ $labels.job }}"
+          description: "p95 latency on {{ $labels.job }} is {{ $value }}s"
+
+      # Webhook dead letter queue growing
+      - alert: WebhookDeadLetterQueueGrowing
+        expr: payment_reference_webhook_dead_letter_total > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook dead letter queue has {{ $value }} events"
+          description: "More than 10 events in the dead letter queue — investigate merchant endpoints"
+
+      # Kafka consumer lag growing
+      - alert: KafkaConsumerLagHigh
+        expr: payment_reference_kafka_consumer_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag is {{ $value }} on {{ $labels.topic }}"
+          description: "Consumer is falling behind — processing may be too slow"

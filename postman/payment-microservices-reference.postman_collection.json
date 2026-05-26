@@ -1,0 +1,1197 @@
+{
+  "info": {
+    "_postman_id": "5c6291e8-6080-4c75-8f12-5e99c9c4a5f3",
+    "name": "Payment Microservices Reference API",
+    "description": "Generated from source code on 2026-05-22. Suggested flow: run Direct Services > Auth Service > Create API Key - bootstrap, then Validate API Key, then use Gateway API requests. Direct service requests require internal HMAC signing and are useful when running individual services locally or after publishing their ports.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "gateway_base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "auth_base_url",
+      "value": "http://localhost:4001",
+      "type": "string"
+    },
+    {
+      "key": "payment_base_url",
+      "value": "http://localhost:4002",
+      "type": "string"
+    },
+    {
+      "key": "ledger_base_url",
+      "value": "http://localhost:4003",
+      "type": "string"
+    },
+    {
+      "key": "webhook_base_url",
+      "value": "http://localhost:4004",
+      "type": "string"
+    },
+    {
+      "key": "bank_base_url",
+      "value": "http://localhost:5001",
+      "type": "string"
+    },
+    {
+      "key": "internal_secret",
+      "value": "local-dev-internal-auth-secret-32chars-min",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "merchant_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "merchant_scope",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "key_id",
+      "value": "replace_with_key_id",
+      "type": "string"
+    },
+    {
+      "key": "payment_id",
+      "value": "replace_with_payment_id",
+      "type": "string"
+    },
+    {
+      "key": "webhook_endpoint_id",
+      "value": "replace_with_webhook_endpoint_id",
+      "type": "string"
+    },
+    {
+      "key": "webhook_delivery_id",
+      "value": "replace_with_webhook_delivery_id",
+      "type": "string"
+    },
+    {
+      "key": "webhook_secret",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Gateway API - localhost:3000",
+      "description": "Public entrypoint. Run a direct Auth bootstrap request first to populate api_key, then these requests authenticate with Authorization: Bearer {{api_key}}. Gateway /health and /metrics skip auth in code.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{api_key}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway_base_url}}/health"
+          }
+        },
+        {
+          "name": "Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway_base_url}}/metrics"
+          }
+        },
+        {
+          "name": "Auth",
+          "item": [
+            {
+              "name": "Create API Key",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{gateway_base_url}}/v1/auth/keys/",
+                "description": "Requires the current {{api_key}} to have full, admin, or auth:write scope.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"merchant_name\": \"Acme Stores\",\n  \"merchant_email\": \"ops+{{$timestamp}}@acme.example\",\n  \"scope\": \"full\",\n  \"expires_at\": \"2027-12-31T23:59:59Z\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 201', function () { pm.expect(pm.response.code).to.equal(201); });",
+                      "const body = pm.response.json();",
+                      "if (body.api_key) { pm.collectionVariables.set('api_key', body.api_key); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Validate API Key",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{gateway_base_url}}/v1/auth/internal/validate",
+                "description": "Validates api_key through the gateway. The gateway itself still requires a bearer key with auth:write/full/admin scope.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"api_key\": \"{{api_key}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 200', function () { pm.expect(pm.response.code).to.equal(200); });",
+                      "const body = pm.response.json();",
+                      "const merchantId = body.merchant_id || body.MerchantID;",
+                      "const scope = body.scope || body.Scope;",
+                      "if (merchantId) { pm.collectionVariables.set('merchant_id', merchantId); }",
+                      "if (scope) { pm.collectionVariables.set('merchant_scope', scope); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Revoke API Key",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{gateway_base_url}}/v1/auth/keys/{{key_id}}/revoke",
+                "description": "Set {{key_id}} manually. The create-key response returns api_key, not key_id.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"merchant requested rotation\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payments",
+          "item": [
+            {
+              "name": "Create Payment",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{gateway_base_url}}/v1/payments",
+                "description": "Use idempotency_key in the JSON body when testing via the gateway; the current proxy does not forward arbitrary request headers like Idempotency-Key.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 5000,\n  \"customer_email\": \"customer@example.com\",\n  \"customer_name\": \"Ada Lovelace\",\n  \"metadata\": {\n    \"order_id\": \"ord_{{$timestamp}}\"\n  },\n  \"idempotency_key\": \"idem_{{$timestamp}}_{{$randomInt}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('payment request returned an expected status', function () { pm.expect([201, 400, 503]).to.include(pm.response.code); });",
+                      "let body = {};",
+                      "try { body = pm.response.json(); } catch (e) {}",
+                      "const paymentId = body.id || body.ID;",
+                      "if (paymentId) { pm.collectionVariables.set('payment_id', paymentId); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List Payments",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/payments?page=1&limit=20&status=completed"
+              }
+            },
+            {
+              "name": "Get Payment",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/payments/{{payment_id}}"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ledger",
+          "item": [
+            {
+              "name": "Get Balance",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/balance"
+              }
+            },
+            {
+              "name": "Verify Balance",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/balance/verify"
+              }
+            },
+            {
+              "name": "Handle Payment Succeeded Event",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{gateway_base_url}}/v1/transactions/payment-succeeded",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"evt_{{$guid}}\",\n  \"type\": \"payment.succeeded\",\n  \"version\": \"1.0\",\n  \"timestamp\": \"2026-05-22T12:00:00Z\",\n  \"source\": \"postman\",\n  \"data\": {\n    \"payment_id\": \"{{payment_id}}\",\n    \"merchant_id\": \"{{merchant_id}}\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"completed\",\n    \"customer_email\": \"customer@example.com\",\n    \"customer_name\": \"Ada Lovelace\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Webhooks",
+          "item": [
+            {
+              "name": "Webhook Service Root",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/webhooks"
+              }
+            },
+            {
+              "name": "Webhook Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/webhooks/health"
+              }
+            },
+            {
+              "name": "Create Endpoint",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{gateway_base_url}}/v1/webhooks/endpoints",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"url\": \"https://example.com/payment-reference/webhook\",\n  \"events\": [\n    \"payment.succeeded\",\n    \"payment.failed\"\n  ],\n  \"description\": \"Postman test endpoint\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 201', function () { pm.expect(pm.response.code).to.equal(201); });",
+                      "const body = pm.response.json();",
+                      "if (body.id) { pm.collectionVariables.set('webhook_endpoint_id', body.id); }",
+                      "if (body.secret) { pm.collectionVariables.set('webhook_secret', body.secret); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List Endpoints",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/webhooks/endpoints"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 200', function () { pm.expect(pm.response.code).to.equal(200); });",
+                      "const body = pm.response.json();",
+                      "if (Array.isArray(body) && body.length > 0 && body[0].id) { pm.collectionVariables.set('webhook_endpoint_id', body[0].id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Update Endpoint",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{gateway_base_url}}/v1/webhooks/endpoints/{{webhook_endpoint_id}}",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"events\": [\n    \"payment.succeeded\"\n  ],\n  \"description\": \"Updated from Postman\",\n  \"isActive\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "List Deliveries",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/webhooks/deliveries?page=1&limit=20"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 200', function () { pm.expect(pm.response.code).to.equal(200); });",
+                      "const body = pm.response.json();",
+                      "if (body && Array.isArray(body.data) && body.data.length > 0 && body.data[0].id) { pm.collectionVariables.set('webhook_delivery_id', body.data[0].id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List Dead Letters",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/webhooks/deliveries/dead-letter"
+              }
+            },
+            {
+              "name": "Retry Delivery",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/webhooks/deliveries/{{webhook_delivery_id}}/retry"
+              }
+            },
+            {
+              "name": "Delete Endpoint",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{gateway_base_url}}/v1/webhooks/endpoints/{{webhook_endpoint_id}}"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Direct Services - internal HMAC signed",
+      "description": "These requests sign x-internal-timestamp, x-internal-body-sha256, and x-internal-signature using collection variable internal_secret. In docker-compose.yml these service ports are not published by default; use these when running services locally or after exposing ports.",
+      "item": [
+        {
+          "name": "Auth Service - localhost:4001",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const internalSecret = pm.collectionVariables.get('internal_secret') || pm.environment.get('internal_secret');",
+                  "if (!internalSecret) {",
+                  "  throw new Error('Set collection variable internal_secret before calling direct internal service routes.');",
+                  "}",
+                  "function headerValue(name) {",
+                  "  const raw = pm.request.headers.get(name);",
+                  "  return raw ? pm.variables.replaceIn(raw) : '';",
+                  "}",
+                  "let requestId = headerValue('x-request-id');",
+                  "if (!requestId) {",
+                  "  requestId = `req_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;",
+                  "}",
+                  "pm.request.headers.upsert({ key: 'x-request-id', value: requestId });",
+                  "const merchantId = headerValue('x-merchant-id');",
+                  "const fullUrl = pm.variables.replaceIn(pm.request.url.toString());",
+                  "const parsedUrl = new URL(fullUrl);",
+                  "const pathWithQuery = parsedUrl.pathname + parsedUrl.search;",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "const rawBody = pm.request.body && pm.request.body.raw ? pm.variables.replaceIn(pm.request.body.raw) : '';",
+                  "const bodyHash = CryptoJS.SHA256(rawBody).toString(CryptoJS.enc.Hex);",
+                  "const canonical = [pm.request.method.toUpperCase(), pathWithQuery, timestamp, requestId, merchantId, bodyHash].join('\\n');",
+                  "const signature = CryptoJS.HmacSHA256(canonical, internalSecret).toString(CryptoJS.enc.Hex);",
+                  "pm.request.headers.upsert({ key: 'x-internal-timestamp', value: timestamp });",
+                  "pm.request.headers.upsert({ key: 'x-internal-body-sha256', value: bodyHash });",
+                  "pm.request.headers.upsert({ key: 'x-internal-signature', value: signature });"
+                ]
+              }
+            }
+          ],
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{auth_base_url}}/health"
+              }
+            },
+            {
+              "name": "Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{auth_base_url}}/metrics"
+              }
+            },
+            {
+              "name": "Create API Key - bootstrap",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  }
+                ],
+                "url": "{{auth_base_url}}/api/v1/auth/keys/",
+                "description": "Run this first to populate {{api_key}}. The code returns api_key in the response.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"merchant_name\": \"Acme Stores\",\n  \"merchant_email\": \"ops+{{$timestamp}}@acme.example\",\n  \"scope\": \"full\",\n  \"expires_at\": \"2027-12-31T23:59:59Z\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 201', function () { pm.expect(pm.response.code).to.equal(201); });",
+                      "const body = pm.response.json();",
+                      "if (body.api_key) { pm.collectionVariables.set('api_key', body.api_key); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Validate API Key",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  }
+                ],
+                "url": "{{auth_base_url}}/api/v1/auth/internal/validate",
+                "description": "Run after bootstrap to populate {{merchant_id}} for direct payment, ledger, and webhook requests.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"api_key\": \"{{api_key}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 200', function () { pm.expect(pm.response.code).to.equal(200); });",
+                      "const body = pm.response.json();",
+                      "const merchantId = body.merchant_id || body.MerchantID;",
+                      "const scope = body.scope || body.Scope;",
+                      "if (merchantId) { pm.collectionVariables.set('merchant_id', merchantId); }",
+                      "if (scope) { pm.collectionVariables.set('merchant_scope', scope); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Revoke API Key",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  }
+                ],
+                "url": "{{auth_base_url}}/api/v1/auth/keys/{{key_id}}/revoke",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"merchant requested rotation\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payment Service - localhost:4002",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const internalSecret = pm.collectionVariables.get('internal_secret') || pm.environment.get('internal_secret');",
+                  "if (!internalSecret) {",
+                  "  throw new Error('Set collection variable internal_secret before calling direct internal service routes.');",
+                  "}",
+                  "function headerValue(name) {",
+                  "  const raw = pm.request.headers.get(name);",
+                  "  return raw ? pm.variables.replaceIn(raw) : '';",
+                  "}",
+                  "let requestId = headerValue('x-request-id');",
+                  "if (!requestId) {",
+                  "  requestId = `req_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;",
+                  "}",
+                  "pm.request.headers.upsert({ key: 'x-request-id', value: requestId });",
+                  "const merchantId = headerValue('x-merchant-id');",
+                  "const fullUrl = pm.variables.replaceIn(pm.request.url.toString());",
+                  "const parsedUrl = new URL(fullUrl);",
+                  "const pathWithQuery = parsedUrl.pathname + parsedUrl.search;",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "const rawBody = pm.request.body && pm.request.body.raw ? pm.variables.replaceIn(pm.request.body.raw) : '';",
+                  "const bodyHash = CryptoJS.SHA256(rawBody).toString(CryptoJS.enc.Hex);",
+                  "const canonical = [pm.request.method.toUpperCase(), pathWithQuery, timestamp, requestId, merchantId, bodyHash].join('\\n');",
+                  "const signature = CryptoJS.HmacSHA256(canonical, internalSecret).toString(CryptoJS.enc.Hex);",
+                  "pm.request.headers.upsert({ key: 'x-internal-timestamp', value: timestamp });",
+                  "pm.request.headers.upsert({ key: 'x-internal-body-sha256', value: bodyHash });",
+                  "pm.request.headers.upsert({ key: 'x-internal-signature', value: signature });"
+                ]
+              }
+            }
+          ],
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{payment_base_url}}/health"
+              }
+            },
+            {
+              "name": "Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{payment_base_url}}/metrics"
+              }
+            },
+            {
+              "name": "Create Payment",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{payment_base_url}}/payments/",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 5000,\n  \"customer_email\": \"customer@example.com\",\n  \"customer_name\": \"Ada Lovelace\",\n  \"metadata\": {\n    \"order_id\": \"ord_{{$timestamp}}\"\n  },\n  \"idempotency_key\": \"idem_{{$timestamp}}_{{$randomInt}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('payment request returned an expected status', function () { pm.expect([201, 400, 503]).to.include(pm.response.code); });",
+                      "let body = {};",
+                      "try { body = pm.response.json(); } catch (e) {}",
+                      "const paymentId = body.id || body.ID;",
+                      "if (paymentId) { pm.collectionVariables.set('payment_id', paymentId); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List Payments",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{payment_base_url}}/payments/?page=1&limit=20&status=completed"
+              }
+            },
+            {
+              "name": "Get Payment",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{payment_base_url}}/payments/{{payment_id}}"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ledger Service - localhost:4003",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const internalSecret = pm.collectionVariables.get('internal_secret') || pm.environment.get('internal_secret');",
+                  "if (!internalSecret) {",
+                  "  throw new Error('Set collection variable internal_secret before calling direct internal service routes.');",
+                  "}",
+                  "function headerValue(name) {",
+                  "  const raw = pm.request.headers.get(name);",
+                  "  return raw ? pm.variables.replaceIn(raw) : '';",
+                  "}",
+                  "let requestId = headerValue('x-request-id');",
+                  "if (!requestId) {",
+                  "  requestId = `req_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;",
+                  "}",
+                  "pm.request.headers.upsert({ key: 'x-request-id', value: requestId });",
+                  "const merchantId = headerValue('x-merchant-id');",
+                  "const fullUrl = pm.variables.replaceIn(pm.request.url.toString());",
+                  "const parsedUrl = new URL(fullUrl);",
+                  "const pathWithQuery = parsedUrl.pathname + parsedUrl.search;",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "const rawBody = pm.request.body && pm.request.body.raw ? pm.variables.replaceIn(pm.request.body.raw) : '';",
+                  "const bodyHash = CryptoJS.SHA256(rawBody).toString(CryptoJS.enc.Hex);",
+                  "const canonical = [pm.request.method.toUpperCase(), pathWithQuery, timestamp, requestId, merchantId, bodyHash].join('\\n');",
+                  "const signature = CryptoJS.HmacSHA256(canonical, internalSecret).toString(CryptoJS.enc.Hex);",
+                  "pm.request.headers.upsert({ key: 'x-internal-timestamp', value: timestamp });",
+                  "pm.request.headers.upsert({ key: 'x-internal-body-sha256', value: bodyHash });",
+                  "pm.request.headers.upsert({ key: 'x-internal-signature', value: signature });"
+                ]
+              }
+            }
+          ],
+          "item": [
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{ledger_base_url}}/health"
+              }
+            },
+            {
+              "name": "Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{ledger_base_url}}/metrics"
+              }
+            },
+            {
+              "name": "Get Balance",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{ledger_base_url}}/balance/"
+              }
+            },
+            {
+              "name": "Verify Balance",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{ledger_base_url}}/balance/verify"
+              }
+            },
+            {
+              "name": "Handle Payment Succeeded Event",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{ledger_base_url}}/transactions/payment-succeeded",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"evt_{{$guid}}\",\n  \"type\": \"payment.succeeded\",\n  \"version\": \"1.0\",\n  \"timestamp\": \"2026-05-22T12:00:00Z\",\n  \"source\": \"postman\",\n  \"data\": {\n    \"payment_id\": \"{{payment_id}}\",\n    \"merchant_id\": \"{{merchant_id}}\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"completed\",\n    \"customer_email\": \"customer@example.com\",\n    \"customer_name\": \"Ada Lovelace\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Webhook Service - localhost:4004",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const internalSecret = pm.collectionVariables.get('internal_secret') || pm.environment.get('internal_secret');",
+                  "if (!internalSecret) {",
+                  "  throw new Error('Set collection variable internal_secret before calling direct internal service routes.');",
+                  "}",
+                  "function headerValue(name) {",
+                  "  const raw = pm.request.headers.get(name);",
+                  "  return raw ? pm.variables.replaceIn(raw) : '';",
+                  "}",
+                  "let requestId = headerValue('x-request-id');",
+                  "if (!requestId) {",
+                  "  requestId = `req_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;",
+                  "}",
+                  "pm.request.headers.upsert({ key: 'x-request-id', value: requestId });",
+                  "const merchantId = headerValue('x-merchant-id');",
+                  "const fullUrl = pm.variables.replaceIn(pm.request.url.toString());",
+                  "const parsedUrl = new URL(fullUrl);",
+                  "const pathWithQuery = parsedUrl.pathname + parsedUrl.search;",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "const rawBody = pm.request.body && pm.request.body.raw ? pm.variables.replaceIn(pm.request.body.raw) : '';",
+                  "const bodyHash = CryptoJS.SHA256(rawBody).toString(CryptoJS.enc.Hex);",
+                  "const canonical = [pm.request.method.toUpperCase(), pathWithQuery, timestamp, requestId, merchantId, bodyHash].join('\\n');",
+                  "const signature = CryptoJS.HmacSHA256(canonical, internalSecret).toString(CryptoJS.enc.Hex);",
+                  "pm.request.headers.upsert({ key: 'x-internal-timestamp', value: timestamp });",
+                  "pm.request.headers.upsert({ key: 'x-internal-body-sha256', value: bodyHash });",
+                  "pm.request.headers.upsert({ key: 'x-internal-signature', value: signature });"
+                ]
+              }
+            }
+          ],
+          "item": [
+            {
+              "name": "Root",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{webhook_base_url}}/"
+              }
+            },
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{webhook_base_url}}/health"
+              }
+            },
+            {
+              "name": "Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{webhook_base_url}}/metrics"
+              }
+            },
+            {
+              "name": "Create Endpoint",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{webhook_base_url}}/endpoints",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"url\": \"https://example.com/payment-reference/webhook\",\n  \"events\": [\n    \"payment.succeeded\",\n    \"payment.failed\"\n  ],\n  \"description\": \"Postman test endpoint\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 201', function () { pm.expect(pm.response.code).to.equal(201); });",
+                      "const body = pm.response.json();",
+                      "if (body.id) { pm.collectionVariables.set('webhook_endpoint_id', body.id); }",
+                      "if (body.secret) { pm.collectionVariables.set('webhook_secret', body.secret); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List Endpoints",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{webhook_base_url}}/endpoints"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 200', function () { pm.expect(pm.response.code).to.equal(200); });",
+                      "const body = pm.response.json();",
+                      "if (Array.isArray(body) && body.length > 0 && body[0].id) { pm.collectionVariables.set('webhook_endpoint_id', body[0].id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Update Endpoint",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{webhook_base_url}}/endpoints/{{webhook_endpoint_id}}",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"events\": [\n    \"payment.succeeded\"\n  ],\n  \"description\": \"Updated from Postman\",\n  \"isActive\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "List Deliveries",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{webhook_base_url}}/deliveries?page=1&limit=20"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('response status is 200', function () { pm.expect(pm.response.code).to.equal(200); });",
+                      "const body = pm.response.json();",
+                      "if (body && Array.isArray(body.data) && body.data.length > 0 && body.data[0].id) { pm.collectionVariables.set('webhook_delivery_id', body.data[0].id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List Dead Letters",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{webhook_base_url}}/deliveries/dead-letter"
+              }
+            },
+            {
+              "name": "Retry Delivery",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{webhook_base_url}}/deliveries/{{webhook_delivery_id}}/retry"
+              }
+            },
+            {
+              "name": "Delete Endpoint",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "x-request-id",
+                    "value": "req_{{$timestamp}}_{{$randomInt}}"
+                  },
+                  {
+                    "key": "x-merchant-id",
+                    "value": "{{merchant_id}}"
+                  }
+                ],
+                "url": "{{webhook_base_url}}/endpoints/{{webhook_endpoint_id}}"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mock and Utility Services",
+      "item": [
+        {
+          "name": "Bank Mock - localhost:5001",
+          "item": [
+            {
+              "name": "Root",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{bank_base_url}}/"
+              }
+            },
+            {
+              "name": "Authorize",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{bank_base_url}}/bank/authorize"
+              }
+            },
+            {
+              "name": "Void",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{bank_base_url}}/bank/void",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reference\": \"bank_ref_{{$timestamp}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
