@@ -307,7 +307,7 @@
                 "url": "{{gateway_base_url}}/v1/transactions/payment-succeeded",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"id\": \"evt_{{$guid}}\",\n  \"type\": \"payment.succeeded\",\n  \"version\": \"1.0\",\n  \"timestamp\": \"2026-05-22T12:00:00Z\",\n  \"source\": \"postman\",\n  \"data\": {\n    \"payment_id\": \"{{payment_id}}\",\n    \"merchant_id\": \"{{merchant_id}}\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"completed\",\n    \"customer_email\": \"customer@example.com\",\n    \"customer_name\": \"Ada Lovelace\"\n  }\n}",
+                  "raw": "{\n  \"id\": \"evt_{{$guid}}\",\n  \"type\": \"payment.succeeded\",\n  \"version\": \"1.0\",\n  \"timestamp\": \"{{$isoTimestamp}}\",\n  \"source\": \"postman\",\n  \"data\": {\n    \"payment_id\": \"{{payment_id}}\",\n    \"merchant_id\": \"{{merchant_id}}\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"completed\",\n    \"customer_email\": \"customer@example.com\",\n    \"customer_name\": \"Ada Lovelace\"\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -878,7 +878,7 @@
                 "url": "{{ledger_base_url}}/transactions/payment-succeeded",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"id\": \"evt_{{$guid}}\",\n  \"type\": \"payment.succeeded\",\n  \"version\": \"1.0\",\n  \"timestamp\": \"2026-05-22T12:00:00Z\",\n  \"source\": \"postman\",\n  \"data\": {\n    \"payment_id\": \"{{payment_id}}\",\n    \"merchant_id\": \"{{merchant_id}}\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"completed\",\n    \"customer_email\": \"customer@example.com\",\n    \"customer_name\": \"Ada Lovelace\"\n  }\n}",
+                  "raw": "{\n  \"id\": \"evt_{{$guid}}\",\n  \"type\": \"payment.succeeded\",\n  \"version\": \"1.0\",\n  \"timestamp\": \"{{$isoTimestamp}}\",\n  \"source\": \"postman\",\n  \"data\": {\n    \"payment_id\": \"{{payment_id}}\",\n    \"merchant_id\": \"{{merchant_id}}\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"completed\",\n    \"customer_email\": \"customer@example.com\",\n    \"customer_name\": \"Ada Lovelace\"\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -916,7 +916,11 @@
                   "const pathWithQuery = parsedUrl.pathname + parsedUrl.search;",
                   "const timestamp = Math.floor(Date.now() / 1000).toString();",
                   "const rawBody = pm.request.body && pm.request.body.raw ? pm.variables.replaceIn(pm.request.body.raw) : '';",
-                  "const bodyHash = CryptoJS.SHA256(rawBody).toString(CryptoJS.enc.Hex);",
+                  "function bodyForWebhookSignature(raw) {",
+                  "  if (!raw) { return ''; }",
+                  "  try { return JSON.stringify(JSON.parse(raw)); } catch (e) { return raw; }",
+                  "}",
+                  "const bodyHash = CryptoJS.SHA256(bodyForWebhookSignature(rawBody)).toString(CryptoJS.enc.Hex);",
                   "const canonical = [pm.request.method.toUpperCase(), pathWithQuery, timestamp, requestId, merchantId, bodyHash].join('\\n');",
                   "const signature = CryptoJS.HmacSHA256(canonical, internalSecret).toString(CryptoJS.enc.Hex);",
                   "pm.request.headers.upsert({ key: 'x-internal-timestamp', value: timestamp });",
