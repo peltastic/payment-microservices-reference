@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin/binding"
 )
 
-const MaxJSONBodyBytes int64 = 1 << 20
+const MaxJSONBodyBytes int64 = 1 << 20 //1mb
 
 func BindJSON(c *gin.Context, target any) error {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxJSONBodyBytes)
