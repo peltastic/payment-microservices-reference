@@ -26,6 +26,7 @@ interface PaymentEvent {
 @Injectable()
 export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
   private consumer: Consumer;
+  private shutdownRequested = false;
 
   private readonly TOPICS = parseTopics(
     process.env.KAFKA_TOPICS || process.env.KAFKA_TOPIC_PAYMENTS || 'payments',
@@ -50,7 +51,44 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async onModuleInit() {
+  onModuleInit() {
+    void this.startConsumerWithRetry();
+  }
+
+  async onModuleDestroy() {
+    this.shutdownRequested = true;
+    try {
+      await this.consumer.disconnect();
+      this.log('INFO', 'kafka consumer disconnected');
+    } catch (err) {
+      this.log('WARN', 'kafka consumer disconnect failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async startConsumerWithRetry() {
+    let attempt = 0;
+
+    while (!this.shutdownRequested) {
+      attempt += 1;
+
+      try {
+        await this.startConsumer();
+        return;
+      } catch (err) {
+        this.log('ERROR', 'kafka consumer startup failed', {
+          attempt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+
+        await this.disconnectAfterFailedStartup();
+        await delay(Math.min(30000, attempt * 2000));
+      }
+    }
+  }
+
+  private async startConsumer() {
     this.log('INFO', 'connecting kafka consumer', {
       topics: this.TOPICS,
     });
@@ -74,9 +112,18 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
     this.log('INFO', 'kafka consumer started', { topics: this.TOPICS });
   }
 
-  async onModuleDestroy() {
-    await this.consumer.disconnect();
-    this.log('INFO', 'kafka consumer disconnected');
+  private async disconnectAfterFailedStartup() {
+    try {
+      await this.consumer.disconnect();
+    } catch (err) {
+      this.log(
+        'WARN',
+        'kafka consumer disconnect after startup failure failed',
+        {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      );
+    }
   }
 
   private async handleMessage({
@@ -275,4 +322,11 @@ function parseTopics(value: string): string[] {
     .filter((topic) => topic.length > 0);
 
   return Array.from(new Set(topics.length > 0 ? topics : ['payments']));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, ms);
+    timeout.unref?.();
+  });
 }
