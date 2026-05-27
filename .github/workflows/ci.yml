@@ -382,6 +382,19 @@ jobs:
           docker version
           docker compose version
 
+      - name: Start broker dependencies
+        run: docker compose up -d --wait postgres redis kafka
+
+      - name: Create Kafka topics
+        run: |
+          docker compose exec -T kafka kafka-topics \
+            --bootstrap-server kafka:9092 \
+            --create \
+            --if-not-exists \
+            --topic payments \
+            --partitions 1 \
+            --replication-factor 1
+
       - name: Start full stack
         run: docker compose up -d --build --wait
 
@@ -393,6 +406,12 @@ jobs:
           docker compose exec -T -e PAYMENT_REFERENCE_E2E_API_KEY="${PAYMENT_REFERENCE_E2E_API_KEY}" gateway sh -lc 'PAYMENT_REFERENCE_E2E_BASE_URL=http://127.0.0.1:3000 npm run test:e2e -- --runInBand'
           docker compose exec -T webhook npm run test:e2e -- --runInBand
           docker compose exec -T bank-mock npm run test:e2e -- --runInBand
+
+      - name: Dump compose diagnostics
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=300
 
       - name: Stop full stack
         if: always()
