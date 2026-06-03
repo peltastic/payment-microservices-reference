@@ -329,10 +329,15 @@ services:
   prometheus:
     image: prom/prometheus:v2.54.1
     restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
     volumes:
       - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./infrastructure/prometheus/alerts.yml:/etc/prometheus/alerts.yml
     networks: [payment_reference]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
 
   grafana:
     image: grafana/grafana:11.3.1
@@ -346,3 +351,5 @@ services:
       - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources
     networks: [payment_reference]
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"

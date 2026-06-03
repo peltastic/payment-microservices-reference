@@ -51,6 +51,7 @@ model WebhookDelivery {
   deadLetter   DeadLetterEvent?
 
   @@index([endpointId])
+  @@index([merchantId, createdAt], map: "webhook_deliveries_merchant_id_created_at_idx")
   @@index([status])
   @@index([nextAttemptAt])
   @@map("webhook_deliveries")

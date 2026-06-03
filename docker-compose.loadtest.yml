@@ -1,0 +1,35 @@
+services:
+  gateway:
+    environment:
+      RATE_LIMIT_MAX: ${LOADTEST_RATE_LIMIT_MAX:-5000}
+
+  k6:
+    image: grafana/k6:0.51.0
+    profiles: [loadtest]
+    depends_on:
+      gateway:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+    environment:
+      K6_BASE_URL: ${K6_BASE_URL:-http://gateway:3000}
+      K6_AUTH_BASE_URL: ${K6_AUTH_BASE_URL:-http://auth:4001}
+      K6_INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-local-dev-internal-auth-secret-32chars-min}
+      K6_PROMETHEUS_RW_SERVER_URL: ${K6_PROMETHEUS_RW_SERVER_URL:-http://prometheus:9090/api/v1/write}
+      K6_PROMETHEUS_RW_TREND_STATS: ${K6_PROMETHEUS_RW_TREND_STATS:-p(95),p(99),avg,max}
+      K6_PROMETHEUS_RW_STALE_MARKERS: ${K6_PROMETHEUS_RW_STALE_MARKERS:-true}
+      K6_TEST_TYPE: ${K6_TEST_TYPE:-smoke}
+      K6_ENDPOINT_PACK: ${K6_ENDPOINT_PACK:-all}
+      K6_SCALE_MULTIPLIER: ${K6_SCALE_MULTIPLIER:-1}
+      K6_SETUP_BOOTSTRAP: ${K6_SETUP_BOOTSTRAP:-true}
+      K6_HTTP_TIMEOUT: ${K6_HTTP_TIMEOUT:-30s}
+      NO_PROXY: localhost,127.0.0.1,::1,auth,payment,ledger,webhook,gateway,bank-mock,postgres,redis,kafka,jaeger,prometheus,grafana,kafka-ui
+      no_proxy: localhost,127.0.0.1,::1,auth,payment,ledger,webhook,gateway,bank-mock,postgres,redis,kafka,jaeger,prometheus,grafana,kafka-ui
+    command:
+      - run
+      - -o
+      - experimental-prometheus-rw
+      - /scripts/main.js
+    volumes:
+      - ./load-tests/k6:/scripts:ro
+    networks: [payment_reference]
