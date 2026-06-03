@@ -1,6 +1,6 @@
 module github.com/peltastic/payment-microservices-reference/ledger
 
-go 1.25.10
+go 1.25.11
 
 require (
 	github.com/gin-gonic/gin v1.12.0

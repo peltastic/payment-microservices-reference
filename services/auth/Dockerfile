@@ -1,4 +1,4 @@
-FROM golang:1.25.10-alpine AS base
+FROM golang:1.25.11-alpine AS base
 WORKDIR /app
 ENV GOMAXPROCS=2
 
